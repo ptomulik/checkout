@@ -1,237 +1,443 @@
-<p align="center">
-  <a href="https://github.com/actions/checkout"><img alt="GitHub Actions status" src="https://github.com/actions/checkout/workflows/test-local/badge.svg"></a>
-</p>
+# Get Releases
 
-# Checkout V2
+![tests](https://github.com/ptomulik/github-action-get-releases/workflows/Tests/badge.svg?branch=master)
+![build](https://github.com/ptomulik/github-action-get-releases/workflows/Build/badge.svg?branch=master)
+![code](https://github.com/ptomulik/github-action-get-releases/workflows/Code%20Quality/badge.svg?branch=master)
 
-This action checks-out your repository under `$GITHUB_WORKSPACE`, so your workflow can access it.
+This action retrieves an array of releases from a remote GitHub repository using GitHub
+[list releases](https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#list-releases)
+API. By default, complete array of remote releases is returned, as retrieved by
+the API client. By configuring certain options (action's inputs), the retrieved
+array may be processed (filtered, sorted, etc..) before it gets outputted.
 
-Only a single commit is fetched by default, for the ref/SHA that triggered the workflow. Set `fetch-depth: 0` to fetch all history for all branches and tags. Refer [here](https://help.github.com/en/articles/events-that-trigger-workflows) to learn which commit `$GITHUB_SHA` points to for different events.
+Some GitHub repositories have to post-process assets created by upstream
+repositories. A repository that puts the assets into Docker images is an
+example. Each time the upstream publishes a new release, the repository should
+rebuild and publish new images. This requires, however, some knowledge about
+existing upstream releases. This action enables us to obtain necessary
+information directly from upstream repository.
 
-The auth token is persisted in the local git config. This enables your scripts to run authenticated git commands. The token is removed during post-job cleanup. Set `persist-credentials: false` to opt-out.
+## Contents
 
-When Git 2.18 or higher is not in your PATH, falls back to the REST API to download the files.
+- [Inputs](#inputs)
+  - [token](#token)
+  - [owner](#owner)\*, [repo](#repo)\*
+  - [per\_page](#per_page), [max\_entries](#max_entries)
+  - [name](#name), [tag\_name](#tag_name), [draft](#draft)
+    [prerelease](#prerelease)
+  - [sort](#sort), [order](#order), [select](#select), [slice](#slice)
+- [Outputs](#outputs)
+  - [json](#json), [base64](#base64), [count](#count)
+- [Examples](#examples)
+  - [Get & Print Releases](#get--print-releases)
 
-# What's new
+## Inputs
 
-- Improved performance
-  - Fetches only a single commit by default
-- Script authenticated git commands
-  - Auth token persisted in the local git config
-- Supports SSH
-- Creates a local branch
-  - No longer detached HEAD when checking out a branch
-- Improved layout
-  - The input `path` is always relative to $GITHUB_WORKSPACE
-  - Aligns better with container actions, where $GITHUB_WORKSPACE gets mapped in
-- Fallback to REST API download
-  - When Git 2.18 or higher is not in the PATH, the REST API will be used to download the files
-  - When using a job container, the container's PATH is used
+Here is a short summary of inputs. Inputs denoted with * are required.
 
-Refer [here](https://github.com/actions/checkout/blob/v1/README.md) for previous versions.
+| input                         | description                                                 |
+| ----------------------------- | ----------------------------------------------------------- |
+| [token](#token)               | Personal token provided to GitHub API client                |
+| [owner](#owner)\*             | Owner of the upstream repository                            |
+| [repo](#repo)\*               | Name of the upstream repository                             |
+| [per\_page](#per_page)        | Page size used by paginator                                 |
+| [max\_entries](#max_entries)  | Max number of requested entries                             |
+| [name](#name)                 | Used to filter retrieved releases by name                   |
+| [tag\_name](#tag_name)        | Used to filter releases by tag\_name                        |
+| [draft](#draft)               | Used to filter releases by draft status                     |
+| [prerelease](#prerelease)     | Used to filter retrieved releases by prerelease status      |
+| [sort](#sort)                 | Used for sorting the retrieved releases                     |
+| [order](#order)               | Default sort order                                          |
+| [select](#select)             | List of properties to be included                           |
+| [slice](#slice)               | The range of entries to be returned                         |
 
-# Usage
+### token
 
-<!-- start usage -->
-```yaml
-- uses: actions/checkout@v2
-  with:
-    # Repository name with owner. For example, actions/checkout
-    # Default: ${{ github.repository }}
-    repository: ''
+Personal token.
 
-    # The branch, tag or SHA to checkout. When checking out the repository that
-    # triggered a workflow, this defaults to the reference or SHA for that event.
-    # Otherwise, uses the default branch.
-    ref: ''
+Personal token may be provided to perform authentication in order to avoid rate
+limiting and other GitHub restrictions that apply to anonymous users. If token
+is missing or empty, authentication is not performed and requests are sent
+anonymously.
 
-    # Personal access token (PAT) used to fetch the repository. The PAT is configured
-    # with the local git config, which enables your scripts to run authenticated git
-    # commands. The post-job step removes the PAT.
-    #
-    # We recommend using a service account with the least permissions necessary. Also
-    # when generating a new PAT, select the least scopes necessary.
-    #
-    # [Learn more about creating and using encrypted secrets](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/creating-and-using-encrypted-secrets)
-    #
-    # Default: ${{ github.token }}
-    token: ''
+### owner
 
-    # SSH key used to fetch the repository. The SSH key is configured with the local
-    # git config, which enables your scripts to run authenticated git commands. The
-    # post-job step removes the SSH key.
-    #
-    # We recommend using a service account with the least permissions necessary.
-    #
-    # [Learn more about creating and using encrypted secrets](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/creating-and-using-encrypted-secrets)
-    ssh-key: ''
+**Required** Repository owner.
 
-    # Known hosts in addition to the user and global host key database. The public SSH
-    # keys for a host may be obtained using the utility `ssh-keyscan`. For example,
-    # `ssh-keyscan github.com`. The public key for github.com is always implicitly
-    # added.
-    ssh-known-hosts: ''
+Owner of the remote repository being queried, for example ``github`` for
+[github/docs](https://github.com/github/docs) repository.
 
-    # Whether to perform strict host key checking. When true, adds the options
-    # `StrictHostKeyChecking=yes` and `CheckHostIP=no` to the SSH command line. Use
-    # the input `ssh-known-hosts` to configure additional hosts.
-    # Default: true
-    ssh-strict: ''
+### repo
 
-    # Whether to configure the token or SSH key with the local git config
-    # Default: true
-    persist-credentials: ''
+**Required** Repository name.
 
-    # Relative path under $GITHUB_WORKSPACE to place the repository
-    path: ''
+Name of the remote repository being queried, for example ``docs`` for
+[github/docs](https://github.com/github/docs) repository.
 
-    # Whether to execute `git clean -ffdx && git reset --hard HEAD` before fetching
-    # Default: true
-    clean: ''
+### per\_page
 
-    # Number of commits to fetch. 0 indicates all history for all branches and tags.
-    # Default: 1
-    fetch-depth: ''
+Page size.
 
-    # Whether to download Git-LFS files
-    # Default: false
-    lfs: ''
+GitHub API enforces pagination. The page size is settable, maximum page
+size is 100. Default page size is 30. This input changes the default page size
+used by paginator, the whole list is retrieved page by page and assembled on
+client side.
 
-    # Whether to checkout submodules: `true` to checkout submodules or `recursive` to
-    # recursively checkout submodules.
-    #
-    # When the `ssh-key` input is not provided, SSH URLs beginning with
-    # `git@github.com:` are converted to HTTPS.
-    #
-    # Default: false
-    submodules: ''
-```
-<!-- end usage -->
+### max\_entries
 
-# Scenarios
+Max number of entries retrieved from remote repository.
 
-- [Fetch all history for all tags and branches](#Fetch-all-history-for-all-tags-and-branches)
-- [Checkout a different branch](#Checkout-a-different-branch)
-- [Checkout HEAD^](#Checkout-HEAD)
-- [Checkout multiple repos (side by side)](#Checkout-multiple-repos-side-by-side)
-- [Checkout multiple repos (nested)](#Checkout-multiple-repos-nested)
-- [Checkout multiple repos (private)](#Checkout-multiple-repos-private)
-- [Checkout pull request HEAD commit instead of merge commit](#Checkout-pull-request-HEAD-commit-instead-of-merge-commit)
-- [Checkout pull request on closed event](#Checkout-pull-request-on-closed-event)
-- [Push a commit using the built-in token](#Push-a-commit-using-the-built-in-token)
+### name
 
-## Fetch all history for all tags and branches
+String used to filter retrieved releases by name.
+
+Select releases whose names match given criteria. The parameter may be set
+to a specific release name, may be a regular expression (possibly with
+flags) or may be missing or empty to allow any name (the same may be achieved
+by name to ``*``).
+
+**Examples**:
+
+Allow any name,
 
 ```yaml
-- uses: actions/checkout@v2
-  with:
-    fetch-depth: 0
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        name: '*'
 ```
 
-## Checkout a different branch
+Select release(s) with name == 'specific'
 
 ```yaml
-- uses: actions/checkout@v2
-  with:
-    ref: my-branch
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        name: 'specific'
 ```
 
-## Checkout HEAD^
+Select releases whose names match a regular expession, the regular expession
+may also contain flags
 
 ```yaml
-- uses: actions/checkout@v2
-  with:
-    fetch-depth: 2
-- run: git checkout HEAD^
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        name: '/^v?5.3.\d+$/'
 ```
 
-## Checkout multiple repos (side by side)
-
 ```yaml
-- name: Checkout
-  uses: actions/checkout@v2
-  with:
-    path: main
-
-- name: Checkout tools repo
-  uses: actions/checkout@v2
-  with:
-    repository: my-org/my-tools
-    path: my-tools
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        name: '/^latest$/i'
 ```
 
-## Checkout multiple repos (nested)
+### tag\_name
+
+String used to filter retrieved releases by tag\_name.
+
+Select releases whose tag names match given criteria. The parameter may be set
+to a specific name, may be a regular expression (possibly with flags) or may be
+missing or empty to allow any name (the same may be achieved by name to ``*``).
+
+
+### draft
+
+Value used to filter retrieved releases by draft status.
+
+Allows selecting draft/non-draft releases. Suported values are ``false``,
+``true`` and ``*``. If missing or empty, allows releases with any draft status.
+
+### prerelease
+
+Value used to filter retrieved releases by prerelease status.
+
+Allows selecting prereleases/non-prereleases.Suported values are ``false``,
+``true`` and ``*``. If missing or empty, allows releases with any draft status.
+
+### sort
+
+List of properties used for sorting the retrieved releases.
+
+Comma-separated list of property names, each optionally followed by order
+specifier - ``'A'``|``'ASC'`` (ascending) or ``'D'``|``'DSC'``|``'DESC'``
+(descending). Used to sort the resultant array.'
+
+Supported (sortable) properties:
+
+| ---------------- | -------------------- | --------------- | --------------- | -------------- | -------------- |
+| ``url``          | ``assets_url``       | ``upload_url``  | ``htlm_url``    | ``id``         | ``node_id``    |
+| ``tag_name``     | ``target_commitish`` | ``name``        | ``draft``       | ``prerelease`` | ``created_at`` |
+| ``published_at`` | ``tarball_url``      | ``zipball_url`` | ``body``        |                |                |
+
+**Examples**:
+
+Sort by ``id``.
 
 ```yaml
-- name: Checkout
-  uses: actions/checkout@v2
-
-- name: Checkout tools repo
-  uses: actions/checkout@v2
-  with:
-    repository: my-org/my-tools
-    path: my-tools
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        sort: 'id'
 ```
 
-## Checkout multiple repos (private)
+Sort by ``id`` in descending order.
 
 ```yaml
-- name: Checkout
-  uses: actions/checkout@v2
-  with:
-    path: main
-
-- name: Checkout private tools
-  uses: actions/checkout@v2
-  with:
-    repository: my-org/my-private-tools
-    token: ${{ secrets.GitHub_PAT }} # `GitHub_PAT` is a secret that contains your PAT
-    path: my-tools
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        sort: 'id DSC'
 ```
 
-> - `${{ github.token }}` is scoped to the current repository, so if you want to checkout a different repository that is private you will need to provide your own [PAT](https://help.github.com/en/github/authenticating-to-github/creating-a-personal-access-token-for-the-command-line).
-
-
-## Checkout pull request HEAD commit instead of merge commit
+Sort by ``draft`` status in ascendig order (``false`` goes first) then by
+``name`` in descending order.
 
 ```yaml
-- uses: actions/checkout@v2
-  with:
-    ref: ${{ github.event.pull_request.head.sha }}
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        sort: 'draft = ASC, name = DSC'
 ```
 
-## Checkout pull request on closed event
+### order
+
+Default sort order.
+
+Allowed values are ``'A'``|``'ASC'`` (ascending) or ``'D'``|``'DSC'``|``'DESC'``
+(descending). If missing or empty, the default sort order is ascending.
+
+### select
+
+List of properties to be returned.
+
+List of properties to be included in each entry of the result. This should
+be a space or comma separated list of keywords. If missing or empty, allows all
+properties (the same may be achieved with ``'*'``).
+
+**Examples**:
+
+Select only ``name`` and ``url``
 
 ```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        select: 'name, url'
+```
+
+### slice
+
+The range of entries to be returned.
+
+Determines the range of entries to be sliceed after sorting.
+
+**Examples**:
+
+Return all entries
+
+```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        slice: 'all'
+```
+
+Return first entry
+
+```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        slice: 'first'
+```
+
+Return up to 3 first entries
+
+```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        slice: 'first 3'
+```
+
+Return last entry
+
+```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        slice: 'last'
+```
+
+Return up to 3 last entries
+
+```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        slice: 'last 3'
+```
+
+Return entries 2 to 4 (zero-based indices)
+
+```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        slice: '2 ... 4'
+```
+
+Return entries from 2 to end of array
+
+```yaml
+  - uses: ptomulik/github-action-get-releases@v0
+    with:
+        slice: '2 ...'
+```
+
+## Outputs
+
+Here is a short summary of inputs. Inputs denoted with * are required.
+
+| output                        | description                                                 |
+| ----------------------------- | ------------------------------------------ |
+| [json](#json)                 | The result as JSON string.                 |
+| [base64](#base64)             | The [json](#json) string encoded in BASE64 |
+| [count](#count)               | The number of entries outputted            |
+
+### json
+
+The result as JSON string.
+
+### base64
+
+The [json](#json) string encoded in BASE64.
+
+### count
+
+Number of entries on output.
+
+## Examples
+
+### Get & Print Releases
+
+The following workflow prints to console releases retrieved from remote
+repository. The workflow may be triggered
+[manually](https://github.blog/changelog/2020-07-06-github-actions-manual-triggers-with-workflow_dispatch/),
+and most of the action's inputs may be provided via HTML form.
+
+Note that ``work_dispatch`` only works on default branch.
+
+```yaml
+---
+name: Get & Print Releases
+
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, closed]
+    workflow_dispatch:
+        inputs:
+            owner:
+                description: 'owner'
+                required: true
+                default: 'ptomulik'
+            repo:
+                description: 'repo'
+                required: true
+                default: 'github-action-get-releases'
+            name:
+                description: 'name (e.g. "Release v1.2.3")'
+                required: false
+            tag_name:
+                description: 'tag_name (e.g. "v1.2.3")'
+                required: false
+                default: '/v0\.\d+.\d+/'
+            draft:
+                description: 'draft ("true" or "false")'
+                required: false
+            prerelease:
+                description: 'prerelease ("true" or "false")'
+                required: false
+            sort:
+                description: 'sort (e.g. "tag_name DSC, id DSC")'
+                required: false
+                default: id DSC
+            select:
+                description: 'select (e.g. "id, tag_name, url")'
+                required: false
+                default: id, name, tag_name, created_at, published_at, url
+            slice:
+                description: 'slice (e.g. "first 3")'
+                required: false
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
+    main:
+        name: Get & Print Releases
+        runs-on: ubuntu-latest
+
+        steps:
+
+            - name: Get Releases
+              id: releases
+              uses: ptomulik/github-action-get-releases@v0
+              with:
+                  token: ${{ secrets.GET_RELEASES_TOKEN }}
+                  owner: ${{ github.event.inputs.owner }}
+                  repo: ${{ github.event.inputs.repo }}
+                  name: ${{ github.event.inputs.name }}
+                  tag_name: ${{ github.event.inputs.tag_name }}
+                  draft: ${{ github.event.inputs.draft }}
+                  prerelease: ${{ github.event.inputs.prerelease }}
+                  sort: ${{ github.event.inputs.sort }}
+                  select: ${{ github.event.inputs.select }}
+                  slice: ${{ github.event.inputs.slice }}
+
+            - name: Print Releases
+              run: |
+                  echo -n 'releases: ' && jq '' <<'!'
+                  ${{ steps.releases.outputs.json }}
+                  !
+                  echo 'count: ${{ steps.releases.outputs.count }}'
+
+# vim: set ft=yaml ts=4 sw=4 sts=4 et:
 ```
 
-## Push a commit using the built-in token
+Console output for workflow's default inputs:
 
-```yaml
-on: push
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - run: |
-          date > generated.txt
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add .
-          git commit -m "generated"
-          git push
+```console
+releases: [
+  {
+    "id": 36197357,
+    "name": "Release v0.1.0",
+    "tag_name": "v0.1.0",
+    "created_at": "2021-01-10T16:22:17Z",
+    "published_at": "2021-01-10T16:24:35Z",
+    "url": "https://api.github.com/repos/ptomulik/github-action-get-releases/releases/36197357"
+  },
+  {
+    "id": 36185784,
+    "name": "Release v0.0.1",
+    "tag_name": "v0.0.1",
+    "created_at": "2021-01-09T22:44:38Z",
+    "published_at": "2021-01-09T22:45:16Z",
+    "url": "https://api.github.com/repos/ptomulik/github-action-get-releases/releases/36185784"
+  },
+  {
+    "id": 36185144,
+    "name": "Release v0.0.0",
+    "tag_name": "v0.0.0",
+    "created_at": "2021-01-09T21:41:45Z",
+    "published_at": "2021-01-09T21:54:33Z",
+    "url": "https://api.github.com/repos/ptomulik/github-action-get-releases/releases/36185144"
+  }
+]
+count: 3
 ```
 
-# License
+## LICENSE
 
-The scripts and documentation in this project are released under the [MIT License](LICENSE)
+Copyright (c) 2021 by Paweł Tomulik <ptomulik@meil.pw.edu.pl>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
